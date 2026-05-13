@@ -1,32 +1,9 @@
 import { useMemo, useState } from "react";
+import { createRoom as createRoomRequest, joinRoom as joinRoomRequest } from "../api";
 import { defaultCategories } from "../data/categories";
-
-const roomStoragePrefix = "ncc-room-";
 
 function normalizeCategory(value) {
   return value.trim().replace(/\s+/g, " ");
-}
-
-function createPlayerId() {
-  return `player-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createRoomKey() {
-  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => letters[Math.floor(Math.random() * letters.length)]).join("");
-}
-
-function getRoomStorageKey(roomKey) {
-  return `${roomStoragePrefix}${roomKey.toUpperCase()}`;
-}
-
-function saveRoom(room) {
-  localStorage.setItem(getRoomStorageKey(room.key), JSON.stringify(room));
-}
-
-function loadRoom(roomKey) {
-  const savedRoom = localStorage.getItem(getRoomStorageKey(roomKey));
-  return savedRoom ? JSON.parse(savedRoom) : null;
 }
 
 function RoomLobby({ onEnterRoom }) {
@@ -58,7 +35,7 @@ function RoomLobby({ onEnterRoom }) {
     return name;
   }
 
-  function createRoom() {
+  async function createRoom() {
     const name = validateName();
     if (!name) return;
 
@@ -67,68 +44,43 @@ function RoomLobby({ onEnterRoom }) {
       return;
     }
 
-    const roomKey = createRoomKey();
-    const playerId = createPlayerId();
-    const room = {
-      key: roomKey,
-      categories,
-      hostId: playerId,
-      guestId: null,
-      players: {
-        [playerId]: name
-      },
-      letter: null,
-      status: "waiting",
-      answers: {},
-      createdAt: Date.now()
-    };
+    try {
+      const room = await createRoomRequest(name, categories);
 
-    saveRoom(room);
-    setCreatedKey(roomKey);
-    setError("");
-    onEnterRoom({
-      playerId,
-      playerName: name,
-      roomKey,
-      role: "host"
-    });
+      setCreatedKey(room.roomCode);
+      setError("");
+      onEnterRoom({
+        playerId: room.playerId,
+        playerName: name,
+        roomKey: room.roomCode,
+        host: room.host,
+        room
+      });
+    } catch (error) {
+      setError(error.message);
+    }
   }
 
-  function joinRoom() {
+  async function joinRoom() {
     const name = validateName();
     if (!name) return;
 
     const roomKey = joinKey.trim().toUpperCase();
-    const room = loadRoom(roomKey);
 
-    if (!room) {
-      setError("Stanza non trovata. Controlla la chiave ricevuta.");
-      return;
+    try {
+      const room = await joinRoomRequest(roomKey, name);
+
+      setError("");
+      onEnterRoom({
+        playerId: room.playerId,
+        playerName: name,
+        roomKey,
+        host: room.host,
+        room
+      });
+    } catch (error) {
+      setError(error.message);
     }
-
-    if (room.guestId && Object.keys(room.players).length >= 2) {
-      setError("Questa stanza ha gia due giocatori.");
-      return;
-    }
-
-    const playerId = createPlayerId();
-    const updatedRoom = {
-      ...room,
-      guestId: playerId,
-      players: {
-        ...room.players,
-        [playerId]: name
-      }
-    };
-
-    saveRoom(updatedRoom);
-    setError("");
-    onEnterRoom({
-      playerId,
-      playerName: name,
-      roomKey,
-      role: "guest"
-    });
   }
 
   return (

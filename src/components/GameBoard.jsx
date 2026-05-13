@@ -1,150 +1,139 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  cancelRoom,
+  endRound,
+  getRoom,
+  startRound,
+  submitAnswers
+} from "../api";
 import CategoryInput from "./CategoryInput";
 import Timer from "./Timer";
 
-const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-const roomStoragePrefix = "ncc-room-";
+const emptyList = [];
 
-function getRandomLetter() {
-  const randomIndex = Math.floor(Math.random() * letters.length);
-  return letters[randomIndex];
-}
-
-function getRoomStorageKey(roomKey) {
-  return `${roomStoragePrefix}${roomKey.toUpperCase()}`;
-}
-
-function getSavedRoom(roomKey) {
-  const savedRoom = localStorage.getItem(getRoomStorageKey(roomKey));
-  return savedRoom ? JSON.parse(savedRoom) : null;
+function createEmptyAnswers(categories) {
+  return categories.reduce((nextAnswers, category) => {
+    nextAnswers[category] = "";
+    return nextAnswers;
+  }, {});
 }
 
 function GameBoard({ session, onLeaveRoom }) {
-  const [room, setRoom] = useState(() => getSavedRoom(session.roomKey));
-  const [letter, setLetter] = useState(null);
+  const [room, setRoom] = useState(session.room);
   const [answers, setAnswers] = useState({});
-  const [gameStarted, setGameStarted] = useState(false);
-  const [gameEnded, setGameEnded] = useState(false);
-  const categories = room?.categories || [];
-  const players = room?.players || {};
-  const opponentEntry = Object.entries(players).find(([id]) => id !== session.playerId);
-  const opponentName = opponentEntry?.[1] || "In attesa";
+  const [error, setError] = useState("");
+  const lastRoundId = useRef(null);
+  const lastSubmittedAnswers = useRef("");
+
+  const categories = room?.categories ?? emptyList;
+  const players = room?.players ?? emptyList;
+  const currentRound = room?.currentRound;
+  const currentPlayer = players.find((player) => player.id === session.playerId);
+  const opponent = players.find((player) => player.id !== session.playerId);
+  const gameStarted = room?.status === "IN_PROGRESS" && currentRound?.status === "IN_PROGRESS";
+  const gameEnded = room?.status === "ROUND_ENDED" || currentRound?.status === "ENDED";
 
   useEffect(() => {
-    function syncRoom(nextRoom) {
-      if (!nextRoom || nextRoom.status === "cancelled") {
-        onLeaveRoom();
-        return;
+    let cancelled = false;
+
+    async function refreshRoom() {
+      try {
+        const nextRoom = await getRoom(session.roomKey);
+
+        if (cancelled) return;
+
+        if (nextRoom.status === "CLOSED") {
+          onLeaveRoom();
+          return;
+        }
+
+        setRoom(nextRoom);
+        setError("");
+      } catch (error) {
+        if (!cancelled) setError(error.message);
       }
-
-      setRoom(nextRoom);
-      setLetter(nextRoom.letter);
-      setGameStarted(nextRoom.status === "playing");
-      setGameEnded(nextRoom.status === "ended");
-      setAnswers(nextRoom.answers?.[session.playerId] || {});
     }
 
-    const savedRoom = getSavedRoom(session.roomKey);
-    if (savedRoom) syncRoom(savedRoom);
-
-    function handleStorage(event) {
-      if (event.key !== getRoomStorageKey(session.roomKey)) return;
-
-      if (!event.newValue) {
-        onLeaveRoom();
-        return;
-      }
-
-      syncRoom(JSON.parse(event.newValue));
-    }
-
-    const channel = new BroadcastChannel(`ncc-room-${session.roomKey}`);
-    function handleMessage(event) {
-      syncRoom(event.data);
-    }
-
-    channel.addEventListener("message", handleMessage);
-    window.addEventListener("storage", handleStorage);
+    refreshRoom();
+    const intervalId = setInterval(refreshRoom, 1000);
 
     return () => {
-      channel.removeEventListener("message", handleMessage);
-      window.removeEventListener("storage", handleStorage);
-      channel.close();
+      cancelled = true;
+      clearInterval(intervalId);
     };
-  }, [onLeaveRoom, session.playerId, session.roomKey]);
+  }, [onLeaveRoom, session.roomKey]);
 
-  function updateRoom(updater) {
-    setRoom((currentRoom) => {
-      const baseRoom = currentRoom || getSavedRoom(session.roomKey);
-      const nextRoom = updater(baseRoom);
+  useEffect(() => {
+    if (!currentRound || lastRoundId.current === currentRound.id) return;
 
-      localStorage.setItem(getRoomStorageKey(session.roomKey), JSON.stringify(nextRoom));
-      const channel = new BroadcastChannel(`ncc-room-${session.roomKey}`);
-      channel.postMessage(nextRoom);
-      channel.close();
-      return nextRoom;
-    });
-  }
+    lastRoundId.current = currentRound.id;
+    lastSubmittedAnswers.current = "";
+    setAnswers(room.answers?.[session.playerId] || createEmptyAnswers(categories));
+  }, [categories, currentRound, room.answers, session.playerId]);
 
-  function startGame() {
-    const newLetter = getRandomLetter();
-    const emptyAnswers = {};
+  useEffect(() => {
+    if (!gameStarted || !currentRound) return;
 
-    categories.forEach((category) => {
-      emptyAnswers[category] = "";
-    });
+    const serializedAnswers = JSON.stringify(answers);
+    if (serializedAnswers === lastSubmittedAnswers.current) return;
 
-    setLetter(newLetter);
-    setAnswers(emptyAnswers);
-    setGameStarted(true);
-    setGameEnded(false);
-    updateRoom((currentRoom) => ({
-      ...currentRoom,
-      letter: newLetter,
-      status: "playing",
-      answers: Object.keys(currentRoom.players).reduce((nextAnswers, playerId) => {
-        nextAnswers[playerId] = { ...emptyAnswers };
-        return nextAnswers;
-      }, {})
-    }));
+    const timeoutId = setTimeout(async () => {
+      try {
+        await submitAnswers(currentRound.id, session.playerId, answers);
+        lastSubmittedAnswers.current = serializedAnswers;
+      } catch (error) {
+        setError(error.message);
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [answers, currentRound, gameStarted, session.playerId]);
+
+  async function handleStartGame() {
+    try {
+      const round = await startRound(session.roomKey, session.playerId);
+
+      setAnswers(createEmptyAnswers(categories));
+      setRoom((currentRoom) => ({
+        ...currentRoom,
+        status: "IN_PROGRESS",
+        currentRound: round,
+        answers: {}
+      }));
+      setError("");
+    } catch (error) {
+      setError(error.message);
+    }
   }
 
   function handleAnswerChange(category, value) {
-    const nextAnswers = {
-      ...answers,
+    setAnswers((prev) => ({
+      ...prev,
       [category]: value
-    };
-
-    setAnswers(nextAnswers);
-    updateRoom((currentRoom) => ({
-      ...currentRoom,
-      answers: {
-        ...currentRoom.answers,
-        [session.playerId]: nextAnswers
-      }
     }));
   }
 
-  function endGame() {
-    setGameEnded(true);
-    setGameStarted(false);
-    updateRoom((currentRoom) => ({
-      ...currentRoom,
-      status: "ended"
-    }));
+  async function handleEndGame() {
+    if (!currentRound) return;
+
+    try {
+      await submitAnswers(currentRound.id, session.playerId, answers);
+      await endRound(currentRound.id);
+      const nextRoom = await getRoom(session.roomKey);
+      setRoom(nextRoom);
+      setError("");
+    } catch (error) {
+      setError(error.message);
+    }
   }
 
-  function cancelGame() {
-    const cancelledRoom = {
-      ...(room || {}),
-      key: session.roomKey,
-      status: "cancelled"
-    };
-    const channel = new BroadcastChannel(`ncc-room-${session.roomKey}`);
+  async function handleCancelGame() {
+    try {
+      await cancelRoom(session.roomKey, session.playerId);
+    } catch {
+      // If the room was already closed, leaving the local session is still the right move.
+    }
 
-    channel.postMessage(cancelledRoom);
-    channel.close();
-    localStorage.removeItem(getRoomStorageKey(session.roomKey));
     onLeaveRoom();
   }
 
@@ -159,11 +148,11 @@ function GameBoard({ session, onLeaveRoom }) {
         </div>
         <div>
           <span>Tu</span>
-          <strong>{session.playerName}</strong>
+          <strong>{currentPlayer?.name || session.playerName}</strong>
         </div>
         <div>
           <span>Avversario</span>
-          <strong>{opponentName}</strong>
+          <strong>{opponent?.name || "In attesa"}</strong>
         </div>
       </section>
 
@@ -173,30 +162,36 @@ function GameBoard({ session, onLeaveRoom }) {
             Dai questa chiave all'altro giocatore. Quando entra, potete iniziare la manche.
           </p>
           <div className="room-actions">
-            <button className="primary-button" onClick={startGame} disabled={!opponentEntry}>
+            <button
+              className="primary-button"
+              onClick={handleStartGame}
+              disabled={!session.host || !opponent}
+            >
               Inizia partita
             </button>
-            <button className="danger-button" onClick={cancelGame}>
+            <button className="danger-button" onClick={handleCancelGame}>
               Annulla partita
             </button>
           </div>
         </>
       )}
 
-      {letter && (
+      {error && <p className="error-message">{error}</p>}
+
+      {currentRound?.letter && (
         <section className="letter-box">
           <span>Lettera estratta</span>
-          <strong>{letter}</strong>
+          <strong>{currentRound.letter}</strong>
         </section>
       )}
 
       {gameStarted && (
         <>
           <Timer
-            key={letter}
-            initialSeconds={120}
+            key={currentRound.id}
+            initialSeconds={currentRound.seconds}
             isRunning={gameStarted}
-            onTimeEnd={endGame}
+            onTimeEnd={handleEndGame}
           />
 
           <div className="categories-grid">
@@ -211,7 +206,7 @@ function GameBoard({ session, onLeaveRoom }) {
             ))}
           </div>
 
-          <button className="danger-button" onClick={endGame}>
+          <button className="danger-button" onClick={handleEndGame}>
             Termina manche
           </button>
         </>
@@ -222,21 +217,25 @@ function GameBoard({ session, onLeaveRoom }) {
           <h2>Risposte manche</h2>
           <div className="result-row result-header">
             <strong>Categoria</strong>
-            <span>{session.playerName}</span>
-            {opponentEntry && <span>{opponentEntry[1]}</span>}
+            <span>{currentPlayer?.name || session.playerName}</span>
+            {opponent && <span>{opponent.name}</span>}
           </div>
 
           {categories.map((category) => (
             <div key={category} className="result-row">
               <strong>{category}:</strong>
-              <span>{answers[category] || "Nessuna risposta"}</span>
-              {opponentEntry && (
-                <span>{room.answers?.[opponentEntry[0]]?.[category] || "Avversario vuoto"}</span>
+              <span>{room.answers?.[session.playerId]?.[category] || answers[category] || "Nessuna risposta"}</span>
+              {opponent && (
+                <span>{room.answers?.[opponent.id]?.[category] || "Avversario vuoto"}</span>
               )}
             </div>
           ))}
 
-          <button className="primary-button" onClick={startGame}>
+          <button
+            className="primary-button"
+            onClick={handleStartGame}
+            disabled={!session.host || !opponent}
+          >
             Nuova manche
           </button>
         </section>
