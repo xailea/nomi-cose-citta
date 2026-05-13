@@ -1,7 +1,7 @@
-export const categories = [
+export const defaultCategories = [
   "Nome",
   "Cosa",
-  "Città",
+  "Citta",
   "Animale",
   "Colore",
   "Mestiere",
