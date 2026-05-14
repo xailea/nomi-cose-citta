@@ -8,6 +8,7 @@ function normalizeCategory(value) {
 
 function RoomLobby({ onEnterRoom }) {
   const [playerName, setPlayerName] = useState("");
+  const [joinPlayerName, setJoinPlayerName] = useState("");
   const [categoriesText, setCategoriesText] = useState(defaultCategories.join(", "));
   const [joinKey, setJoinKey] = useState("");
   const [createdKey, setCreatedKey] = useState("");
@@ -24,8 +25,8 @@ function RoomLobby({ onEnterRoom }) {
     return Array.from(uniqueCategories);
   }, [categoriesText]);
 
-  function validateName() {
-    const name = playerName.trim();
+  function validateName(value) {
+    const name = value.trim();
 
     if (!name) {
       setError("Inserisci il tuo nome prima di continuare.");
@@ -36,7 +37,7 @@ function RoomLobby({ onEnterRoom }) {
   }
 
   async function createRoom() {
-    const name = validateName();
+    const name = validateName(playerName);
     if (!name) return;
 
     if (categories.length < 2) {
@@ -62,7 +63,7 @@ function RoomLobby({ onEnterRoom }) {
   }
 
   async function joinRoom() {
-    const name = validateName();
+    const name = validateName(joinPlayerName);
     if (!name) return;
 
     const roomKey = joinKey.trim().toUpperCase();
@@ -95,7 +96,7 @@ function RoomLobby({ onEnterRoom }) {
             type="text"
             value={playerName}
             onChange={(event) => setPlayerName(event.target.value)}
-            placeholder="Es. Alessio"
+            placeholder="Es. Strawberry"
           />
         </div>
 
@@ -127,6 +128,17 @@ function RoomLobby({ onEnterRoom }) {
 
       <section className="lobby-panel">
         <h2>Entra in stanza</h2>
+
+        <div className="field-group">
+          <label htmlFor="join-player-name">Il tuo nome</label>
+          <input
+            id="join-player-name"
+            type="text"
+            value={joinPlayerName}
+            onChange={(event) => setJoinPlayerName(event.target.value)}
+            placeholder="Es. Goku"
+          />
+        </div>
 
         <div className="field-group">
           <label htmlFor="join-key">Chiave ricevuta</label>

@@ -59,6 +59,27 @@ export function endRound(roundId) {
   });
 }
 
+export function submitValidations(roundId, playerId, targetPlayerId, validations) {
+  return request(`/api/rounds/${roundId}/validations`, {
+    method: "POST",
+    body: JSON.stringify({ playerId, targetPlayerId, validations })
+  });
+}
+
+export function markValidationReady(roundId, playerId) {
+  return request(`/api/rounds/${roundId}/validations/ready`, {
+    method: "POST",
+    body: JSON.stringify({ playerId })
+  });
+}
+
+export function finishRoom(roomCode, playerId) {
+  return request(`/api/rooms/${roomCode}/finish`, {
+    method: "POST",
+    body: JSON.stringify({ playerId })
+  });
+}
+
 export function cancelRoom(roomCode, playerId) {
   return request(`/api/rooms/${roomCode}/cancel`, {
     method: "POST",
