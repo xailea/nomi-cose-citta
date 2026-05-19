@@ -27,18 +27,23 @@ function normalizeAnswer(value) {
 }
 
 function getStoredAnswers(room, playerId) {
+  const roundAnswers = room?.currentRound?.answers;
+
+  if (room?.currentRound) {
+    if (!Array.isArray(roundAnswers)) return roundAnswers?.[playerId] ?? {};
+
+    return roundAnswers
+      .filter((answer) => String(answer.playerId) === String(playerId))
+      .reduce((nextAnswers, answer) => {
+        nextAnswers[answer.category] = answer.answer;
+        return nextAnswers;
+      }, {});
+  }
+
   const roomAnswers = room?.answers?.[playerId];
   if (roomAnswers) return roomAnswers;
 
-  const roundAnswers = room?.currentRound?.answers;
-  if (!Array.isArray(roundAnswers)) return roundAnswers?.[playerId] ?? {};
-
-  return roundAnswers
-    .filter((answer) => String(answer.playerId) === String(playerId))
-    .reduce((nextAnswers, answer) => {
-      nextAnswers[answer.category] = answer.answer;
-      return nextAnswers;
-    }, {});
+  return {};
 }
 
 function getRoundAnswerRecord(room, playerId, category) {
@@ -81,7 +86,9 @@ function getReadyPlayerIds(currentRound) {
 function getWinnerGenderClass(winner) {
   if (!winner?.name) return "";
 
-  return winner.name.trim().toLocaleLowerCase("it-IT").endsWith("a")
+  const normalizedName = winner.name.trim().toLocaleLowerCase("it-IT");
+
+  return normalizedName.endsWith("a") || normalizedName.endsWith("s")
     ? "victory-background-f"
     : "victory-background-m";
 }
