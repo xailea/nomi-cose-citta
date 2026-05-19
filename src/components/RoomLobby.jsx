@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { createRoom as createRoomRequest, joinRoom as joinRoomRequest } from "../api";
+import giftImage from "../assets/gift.png";
 import { defaultCategories } from "../data/categories";
 
 function normalizeCategory(value) {
@@ -155,6 +156,10 @@ function RoomLobby({ onEnterRoom }) {
           Entra
         </button>
       </section>
+
+      <div className="lobby-gift" aria-hidden="true">
+        <img src={giftImage} alt="" />
+      </div>
 
       {error && <p className="error-message">{error}</p>}
     </main>
